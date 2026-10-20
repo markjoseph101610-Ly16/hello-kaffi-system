@@ -31,3 +31,10 @@ Open `public/config.js` and set `RENDER_API` to your Render URL (before pushing)
 
 ## Local test
 `npm install`, copy `.env.example` to `.env` and fill it, `npm start`, open http://localhost:3000
+
+## Supabase database
+1. Supabase dashboard > SQL Editor > New query > paste all of `supabase/schema.sql` > **Run** (safe to run again).
+2. Render env vars: `SUPABASE_URL` (Project URL) and `SUPABASE_SERVICE_KEY` (the **secret** key, `sb_secret_...`). Never use the publishable key.
+3. The app saves to `kaffi_docs` and, after every save, copies the changes into the real tables (`customers`, `menu_items`, `orders`, `order_items`, `payments`, `deliveries`, `riders`, ...). Errors show in the Render logs starting with `[tables]`.
+4. Already have data in `kaffi_docs`? Run once from your PC (with a filled `.env`): `npm install` then `npm run sync-tables`.
+5. All tables have Row Level Security ON with no policies: only the backend (secret key) can read them.

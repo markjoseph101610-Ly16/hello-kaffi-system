@@ -19,6 +19,7 @@ const admin = require('firebase-admin');
   }
 })();
 const nodemailer = require('nodemailer');
+const tables = require('./_lib/tables');   // copies the app data into the real Supabase tables (see supabase/schema.sql)
 
 // Firebase Admin: verifies Google ID tokens AND is the database (Firestore).
 // Credentials: env FIREBASE_SERVICE_ACCOUNT (the whole serviceAccountKey.json text, or its base64) -> or a local serviceAccountKey.json in the project root.
@@ -176,7 +177,7 @@ const seed = () => ({
   nextMenuId: 1000,
   orders: []
 });
-let db = null, loadedRev = -1, snap = new Map(), dirty = false;
+let db = null, loadedRev = -1, snap = new Map(), dirty = false, tablesPrev = new Map();   // tablesPrev = what was last copied into the real tables
 const extraSets = [], extraDels = [];            // proof images / report files queued by a request, written in the same flush
 const save = () => { dirty = true; };            // handlers call save() as before; the real write happens once, just before the response is sent
 const orderDoc = id => 'o_' + Math.floor(id / 100);
@@ -232,6 +233,8 @@ async function flush() {
     snap.forEach((j, n) => { if (!now.has(n)) d.push({ col: COL, id: n }); });
     const rev = Math.max(Date.now(), Math.ceil(loadedRev) + 1) + Math.random();
     if (w.length || d.length) { w.push({ col: COL, id: 'rev', data: { n: rev } }); await store.commit(w, d.concat(dels)); loadedRev = rev; snap = now; }
+    // copy the changes into staff_accounts / customers / orders / ... If this fails the app keeps working (the JSON above is the source of truth).
+    if (db && tables.enabled()) { try { tablesPrev = await tables.sync(db, tablesPrev); } catch (e) { console.error('[tables] copy failed:', e.message); } }
   } else if (dels.length) await store.commit([], dels);
 }
 const queueProof = (name, ext, buf) => { if (buf.length > 700 * 1024) { const e = new Error('Proof image is too large (max 700 KB)'); e.status = 400; throw e; } extraSets.push({ col: PROOFS, id: name, data: { ext, b64: buf.toString('base64') } }); };
@@ -864,6 +867,15 @@ app.importLegacy = async ({ legacy, proofs = [], reports = [], force = false }) 
   reports.forEach(r => extraSets.push({ col: REPORTS, id: r.name, data: { size: Buffer.byteLength(r.text), modified: r.modified, gz: zlib.gzipSync(Buffer.from(r.text, 'utf8')).toString('base64') } }));
   await flush();
   return { orders: db.orders.length, customers: db.customers.length, profiles: Object.keys(db.profiles).length, proofs: proofs.length, reports: reports.length };
+};
+
+/* Used by scripts/sync-tables.js: copy EVERYTHING into the real tables once (npm run sync-tables). */
+app.syncTables = async () => {
+  if (!tables.enabled()) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_KEY are not set');
+  await refresh();
+  tablesPrev = await tables.sync(db, new Map());
+  const { T } = tables.snapshot(db);
+  return { staff: T.staff_accounts.length, customers: T.customers.length, menu: T.menu_items.length, riders: T.riders.length, orders: T.orders.length };
 };
 
 module.exports = app;
